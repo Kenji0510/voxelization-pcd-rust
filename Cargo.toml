@@ -1,0 +1,10 @@
+[package]
+name = "voxelization-myself"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.97"
+# For loading pcd files
+pcd-rs = { version = "0.12.0", features = ["derive"] }
+rayon = "1.10.0"
