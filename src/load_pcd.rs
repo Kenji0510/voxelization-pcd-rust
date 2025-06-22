@@ -46,7 +46,7 @@ pub fn save_pcd(file_path: &str, points: Vec<Point>) -> Result<(), Box<dyn std::
         data_kind: pcd_rs::DataKind::Ascii,
         schema: None,
     }
-    .create("/Users/kenji/workspace/Rust/voxelization-myself/data/export-p.pcd")?;
+    .create("/Users/kenji/workspace/Rust/voxelization-myself/data/export-p-g.pcd")?;
 
     for point in points {
         writer.push(&point)?;
