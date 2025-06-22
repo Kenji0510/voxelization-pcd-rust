@@ -58,7 +58,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>,
   // --- WG 内 Reduction (隣り合う同キーをまとめる) ----
   var step:u32 = 128u;
   loop {
-      if (w_key[lid.x] == w_key[lid.x + step]) {
+      if (lid.x < step && w_key[lid.x] == w_key[lid.x + step]) {
           w_sum[lid.x] += w_sum[lid.x + step];
           w_cnt[lid.x] += w_cnt[lid.x + step];
           w_key[lid.x + step] = 0xffffffffu;   // 無効化
@@ -79,11 +79,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>,
                 let sy = i32(round(w_sum[lid.x].y * uni.scale));
                 let sz = i32(round(w_sum[lid.x].z * uni.scale));
 
-                // 自分が確保 or 同キー
-                // atomicAdd(&table_sum[slot].x, w_sum[lid.x].x);
-                // atomicAdd(&table_sum[slot].y, w_sum[lid.x].y);
-                // atomicAdd(&table_sum[slot].z, w_sum[lid.x].z);
-                // atomicAdd(&table_cnt[slot],   w_cnt[lid.x]);
                 atomicAdd(&sum_x[slot], sx);
                 atomicAdd(&sum_y[slot], sy);
                 atomicAdd(&sum_z[slot], sz);

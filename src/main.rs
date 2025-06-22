@@ -115,8 +115,8 @@ fn main() {
     println!("Hello, world!");
 
     let pcd_data = match load_pcd::load_pcd(
-        // "/Users/kenji/workspace/Rust/rerun-sample/data/Laser_map/Laser_map_35.pcd",
-        "/Users/kenji/Downloads/combined_120.pcd",
+        "/Users/kenji/workspace/Rust/rerun-sample/data/Laser_map/Laser_map_35.pcd",
+        // "/Users/kenji/Downloads/combined_120.pcd",
     ) {
         Ok(points) => points,
         Err(e) => {
