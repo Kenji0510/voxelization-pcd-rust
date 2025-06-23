@@ -1,5 +1,4 @@
 struct Point { x: f32, y: f32, z: f32 };
-// struct Uniforms { origin: vec3<f32>, inv_vox: f32 };
 struct Uniforms {
     origin   : vec3<f32>,
     inv_vox  : f32,
@@ -17,9 +16,6 @@ struct Uniforms {
 @group(0) @binding(6) var<storage, read_write> fail_cnt   : atomic<u32>;
 @group(0) @binding(7) var<uniform>             uni        : Uniforms;
 @group(0) @binding(8) var<storage, read_write> centroids_num : atomic<u32>;
-
-// const HASH_MASK : u32 = 1023u; /* capacity - 1 を Rust で `#define` 的に埋め込む */
-// override HASH_MASK: u32;
 
 var<workgroup> w_key  : array<u32, 256>;
 var<workgroup> w_sum  : array<vec3<f32>, 256>;
