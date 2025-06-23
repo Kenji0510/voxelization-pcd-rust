@@ -166,11 +166,12 @@ fn main() {
     }
 
     let mut limits = wgpu::Limits::default();
+    limits.max_storage_buffers_per_shader_stage = 9;
 
-    // println!(
-    //     "max_storage_buffer_binding_size: {:?}",
-    //     limits.max_storage_buffer_binding_size
-    // );
+    println!(
+        "max_storage_buffer_binding_size: {:?}",
+        limits.max_storage_buffers_per_shader_stage
+    );
 
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: None,
@@ -246,10 +247,18 @@ fn main() {
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
+    let centroids_num = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("centroids_num"),
+        contents: bytemuck::bytes_of(&0u32),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+
     let input_data_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
         contents: bytemuck::cast_slice(&pcd_points),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
     });
 
     // let download_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -266,7 +275,7 @@ fn main() {
                 binding: 0,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
                     min_binding_size: None,
                     has_dynamic_offset: false,
                 },
@@ -360,6 +369,17 @@ fn main() {
                 },
                 count: None,
             },
+            // 8. centroids_num
+            wgpu::BindGroupLayoutEntry {
+                binding: 8,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -403,6 +423,10 @@ fn main() {
                 binding: 7,
                 resource: uniform_buf.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: centroids_num.as_entire_binding(),
+            },
         ],
     });
 
@@ -425,6 +449,16 @@ fn main() {
         cache: None,
     });
 
+    let pipeline2 = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&pipeline_layout),
+        module: &module,
+        entry_point: Some("centroid_main"),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        // compilation_options: compilation_op,
+        cache: None,
+    });
+
     let mut encoder =
         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
@@ -439,6 +473,9 @@ fn main() {
     const WG_SIZE: u32 = 256;
     let workgroups = ((pcd_points.len() as u32) + WG_SIZE - 1) / WG_SIZE; // 切り上げ
 
+    // let capacity = uni.hash_mask + 1;
+    let wg_cnt = (uni.hash_mask + 1 + WG_SIZE - 1) / WG_SIZE;
+
     //------------------------------------------------------------------
     // ② Compute Pass: パイプライン + BindGroup + dispatch
     //------------------------------------------------------------------
@@ -452,6 +489,16 @@ fn main() {
         cpass.dispatch_workgroups(workgroups, 1, 1);
     } // ← drop で自動 end_pass
 
+    {
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("centroid_pass"),
+            timestamp_writes: None,
+        });
+        cpass.set_pipeline(&pipeline2);
+        cpass.set_bind_group(0, &bind_group, &[]);
+        cpass.dispatch_workgroups(wg_cnt, 1, 1);
+    }
+
     //------------------------------------------------------------------
     // ③ fail_counter を CPU にコピーするステージングバッファ
     //------------------------------------------------------------------
@@ -462,11 +509,26 @@ fn main() {
         mapped_at_creation: false,
     });
 
+    let staging_centroids_num = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("staging_centroids_num"),
+        size: std::mem::size_of::<u32>() as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
     // コピー命令をエンコード
     encoder.copy_buffer_to_buffer(
         &fail_counter, // src
         0,
         &staging_fail, // dst
+        0,
+        std::mem::size_of::<u32>() as u64,
+    );
+
+    encoder.copy_buffer_to_buffer(
+        &centroids_num, // src
+        0,
+        &staging_centroids_num, // dst
         0,
         std::mem::size_of::<u32>() as u64,
     );
@@ -483,18 +545,26 @@ fn main() {
             mapped_at_creation: false,
         })
     }
-    let st_sumx = staging(&device, "st_sumx", byte_len_i32);
-    let st_sumy = staging(&device, "st_sumy", byte_len_i32);
-    let st_sumz = staging(&device, "st_sumz", byte_len_i32);
-    let st_cnt = staging(&device, "st_cnt", byte_len_u32);
-    let st_keys = staging(&device, "st_keys", byte_len_u32);
+    // let st_sumx = staging(&device, "st_sumx", byte_len_i32);
+    // let st_sumy = staging(&device, "st_sumy", byte_len_i32);
+    // let st_sumz = staging(&device, "st_sumz", byte_len_i32);
+    // let st_cnt = staging(&device, "st_cnt", byte_len_u32);
+    // let st_keys = staging(&device, "st_keys", byte_len_u32);
+    let d_buffer = staging(&device, "d_buffer", input_data_buffer.size());
 
     // 2. コピー命令をエンコード（encoder は新しく作り直す）
-    encoder.copy_buffer_to_buffer(&sum_x_buf, 0, &st_sumx, 0, byte_len_i32);
-    encoder.copy_buffer_to_buffer(&sum_y_buf, 0, &st_sumy, 0, byte_len_i32);
-    encoder.copy_buffer_to_buffer(&sum_z_buf, 0, &st_sumz, 0, byte_len_i32);
-    encoder.copy_buffer_to_buffer(&table_cnt, 0, &st_cnt, 0, byte_len_u32);
-    encoder.copy_buffer_to_buffer(&table_keys, 0, &st_keys, 0, byte_len_u32);
+    // encoder.copy_buffer_to_buffer(&sum_x_buf, 0, &st_sumx, 0, byte_len_i32);
+    // encoder.copy_buffer_to_buffer(&sum_y_buf, 0, &st_sumy, 0, byte_len_i32);
+    // encoder.copy_buffer_to_buffer(&sum_z_buf, 0, &st_sumz, 0, byte_len_i32);
+    // encoder.copy_buffer_to_buffer(&table_cnt, 0, &st_cnt, 0, byte_len_u32);
+    // encoder.copy_buffer_to_buffer(&table_keys, 0, &st_keys, 0, byte_len_u32);
+    encoder.copy_buffer_to_buffer(
+        &input_data_buffer,
+        0,
+        &d_buffer,
+        0,
+        input_data_buffer.size(),
+    );
 
     device.poll(wgpu::PollType::Wait).unwrap();
 
@@ -522,6 +592,15 @@ fn main() {
     drop(data);
     staging_fail.unmap();
 
+    let cent_slice = staging_centroids_num.slice(..);
+    cent_slice.map_async(wgpu::MapMode::Read, |_| ());
+    device.poll(wgpu::PollType::Wait).unwrap(); // ブロッキング待機
+
+    let cent_data = cent_slice.get_mapped_range();
+    let cent_num_value = *bytemuck::from_bytes::<u32>(&cent_data);
+    drop(cent_data);
+    staging_centroids_num.unmap();
+
     assert!(
         fail_val == 0,
         "Hash table overflowed (fail_cnt = {}), consider larger capacity!",
@@ -529,6 +608,7 @@ fn main() {
     );
 
     println!("Compute shader finished — fail_cnt = {}", fail_val);
+    println!("Number of Centroids: {}", &cent_num_value);
 
     // 3. マップ & スライス
     macro_rules! map_slice {
@@ -539,62 +619,87 @@ fn main() {
             slice.get_mapped_range()
         }};
     }
-    let m_sumx = map_slice!(st_sumx);
-    let m_sumy = map_slice!(st_sumy);
-    let m_sumz = map_slice!(st_sumz);
-    let m_cnt = map_slice!(st_cnt);
-    let m_keys = map_slice!(st_keys);
+    // let m_sumx = map_slice!(st_sumx);
+    // let m_sumy = map_slice!(st_sumy);
+    // let m_sumz = map_slice!(st_sumz);
+    // let m_cnt = map_slice!(st_cnt);
+    // let m_keys = map_slice!(st_keys);
+    let m_d_buffer = map_slice!(d_buffer);
 
-    // 4. 重心計算
+    let centroids_ref: &[f32] = bytemuck::cast_slice(&m_d_buffer);
+
+    // let count = (cent_num_value * 3) as usize;
     let mut centroids = Vec::new();
-    let sumx_i32: &[i32] = bytemuck::cast_slice(&m_sumx);
-    let sumy_i32: &[i32] = bytemuck::cast_slice(&m_sumy);
-    let sumz_i32: &[i32] = bytemuck::cast_slice(&m_sumz);
 
-    let cnt_u32: &[u32] = bytemuck::cast_slice(&m_cnt);
-    // println!("cnt_u32: {:?}", cnt_u32.len());
-    let keys_u32: &[u32] = bytemuck::cast_slice(&m_keys);
-    // println!("keys_u32: {:?}", keys_u32);
-
-    // ❷ capacity 要素あるか確認
-    assert_eq!(sumx_i32.len(), capacity as usize);
-
-    // ❸ ループは “i番目の要素” を直接参照
-    for i in 0..capacity as usize {
-        let key = keys_u32[i];
-        if key == 0 {
-            continue;
-        }
-
-        let cnt = cnt_u32[i] as f32;
-        let sumx = sumx_i32[i] as f32 * uni.inv_scale;
-        let sumy = sumy_i32[i] as f32 * uni.inv_scale;
-        let sumz = sumz_i32[i] as f32 * uni.inv_scale;
-
+    for i in 0..cent_num_value as usize {
         centroids.push(Point {
-            x: sumx / cnt,
-            y: sumy / cnt,
-            z: sumz / cnt,
-        });
+            x: centroids_ref[i * 3],
+            y: centroids_ref[i * 3 + 1],
+            z: centroids_ref[i * 3 + 2],
+        })
     }
 
-    drop(m_sumx);
-    drop(m_sumy);
-    drop(m_sumz);
-    drop(m_cnt);
-    drop(m_keys);
-
-    // アンマップ
-    st_sumx.unmap();
-    st_sumy.unmap();
-    st_sumz.unmap();
-    st_cnt.unmap();
-    st_keys.unmap();
-
     let elpased = start.elapsed();
+    // 4. 重心計算
+    // let mut centroids = Vec::new();
+    // let sumx_i32: &[i32] = bytemuck::cast_slice(&m_sumx);
+    // let sumy_i32: &[i32] = bytemuck::cast_slice(&m_sumy);
+    // let sumz_i32: &[i32] = bytemuck::cast_slice(&m_sumz);
+
+    // let cnt_u32: &[u32] = bytemuck::cast_slice(&m_cnt);
+    // // println!("cnt_u32: {:?}", cnt_u32.len());
+    // let keys_u32: &[u32] = bytemuck::cast_slice(&m_keys);
+    // // println!("keys_u32: {:?}", keys_u32);
+
+    // // ❷ capacity 要素あるか確認
+    // assert_eq!(sumx_i32.len(), capacity as usize);
+
+    // // ❸ ループは “i番目の要素” を直接参照
+    // for i in 0..capacity as usize {
+    //     let key = keys_u32[i];
+    //     if key == 0 {
+    //         continue;
+    //     }
+
+    //     let cnt = cnt_u32[i] as f32;
+    //     let sumx = sumx_i32[i] as f32 * uni.inv_scale;
+    //     let sumy = sumy_i32[i] as f32 * uni.inv_scale;
+    //     let sumz = sumz_i32[i] as f32 * uni.inv_scale;
+
+    //     centroids.push(Point {
+    //         x: sumx / cnt,
+    //         y: sumy / cnt,
+    //         z: sumz / cnt,
+    //     });
+    // }
+
+    // drop(m_sumx);
+    // drop(m_sumy);
+    // drop(m_sumz);
+    // drop(m_cnt);
+    // drop(m_keys);
+    drop(m_d_buffer);
+
+    // // アンマップ
+    // st_sumx.unmap();
+    // st_sumy.unmap();
+    // st_sumz.unmap();
+    // st_cnt.unmap();
+    // st_keys.unmap();
+    d_buffer.unmap();
+
+    // let elpased = start.elapsed();
 
     println!("Processed time: {:?}", elpased);
     println!("Voxelized points: {}", centroids.len());
+
+    let s = match load_pcd::save_pcd("aa", centroids) {
+        Ok(()) => println!("Successfully to save!"),
+        Err(e) => {
+            eprintln!("Failed to save voxelized pcd!");
+            return;
+        }
+    };
 
     // let s = match load_pcd::save_pcd("aa", centroids) {
     //     Ok(()) => println!("Successfully to save!"),

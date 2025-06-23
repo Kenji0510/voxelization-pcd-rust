@@ -5,10 +5,10 @@ struct Uniforms {
     inv_vox  : f32,
     scale    : f32,
     inv_scale: f32,
-    hash_mask: u32,
+    hash_mask: u32, // capasity
 };
 
-@group(0) @binding(0) var<storage, read>  points : array<Point>;
+@group(0) @binding(0) var<storage, read_write>  points : array<Point>;
 @group(0) @binding(1) var<storage, read_write> table_keys : array<atomic<u32>>;
 @group(0) @binding(2) var<storage, read_write> sum_x : array<atomic<i32>>;
 @group(0) @binding(3) var<storage, read_write> sum_y : array<atomic<i32>>;
@@ -16,6 +16,7 @@ struct Uniforms {
 @group(0) @binding(5) var<storage, read_write> table_cnt  : array<atomic<u32>>;
 @group(0) @binding(6) var<storage, read_write> fail_cnt   : atomic<u32>;
 @group(0) @binding(7) var<uniform>             uni        : Uniforms;
+@group(0) @binding(8) var<storage, read_write> centroids_num : atomic<u32>;
 
 // const HASH_MASK : u32 = 1023u; /* capacity - 1 を Rust で `#define` 的に埋め込む */
 // override HASH_MASK: u32;
@@ -90,4 +91,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>,
         // 挿入失敗
         atomicAdd(&fail_cnt, 1u);
   }
+}
+
+@compute @workgroup_size(256)
+fn centroid_main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= uni.hash_mask) {
+        return;
+    }
+
+    let k = atomicLoad(&table_keys[i]);
+    if (k == 0u) {
+        return;
+    }
+    let dst = atomicAdd(&centroids_num, 1u);
+    let c  = f32(atomicLoad(&table_cnt[i]));
+    let sx = f32(atomicLoad(&sum_x[i])) * uni.inv_scale;
+    let sy = f32(atomicLoad(&sum_y[i])) * uni.inv_scale;
+    let sz = f32(atomicLoad(&sum_z[i])) * uni.inv_scale;
+
+    points[dst] = Point(sx / c, sy / c, sz / c);
 }
