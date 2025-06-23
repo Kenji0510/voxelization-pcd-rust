@@ -165,8 +165,12 @@ fn main() {
         panic!("Adapter does not support compute shaders!");
     }
 
-    let mut limits = wgpu::Limits::downlevel_defaults();
-    limits.max_storage_buffers_per_shader_stage = 8;
+    let mut limits = wgpu::Limits::default();
+
+    // println!(
+    //     "max_storage_buffer_binding_size: {:?}",
+    //     limits.max_storage_buffer_binding_size
+    // );
 
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: None,
@@ -248,12 +252,12 @@ fn main() {
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
 
-    let download_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: input_data_buffer.size(),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
+    // let download_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+    //     label: None,
+    //     size: input_data_buffer.size(),
+    //     usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+    //     mapped_at_creation: false,
+    // });
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: None,
@@ -408,12 +412,16 @@ fn main() {
         push_constant_ranges: &[],
     });
 
+    // let mut compilation_op = wgpu::PipelineCompilationOptions::default();
+    // compilation_op.zero_initialize_workgroup_memory = false;
+
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: None,
         layout: Some(&pipeline_layout),
         module: &module,
         entry_point: Some("main"),
         compilation_options: wgpu::PipelineCompilationOptions::default(),
+        // compilation_options: compilation_op,
         cache: None,
     });
 
