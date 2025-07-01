@@ -10,18 +10,23 @@ struct VoxelStat {
     count: u32,
 }
 
-type FastMap<V> = HashMap<u64, V, std::hash::BuildHasherDefault<NoHashHasher<u64>>>;
+type FastMap<V> = HashMap<u32, V, std::hash::BuildHasherDefault<NoHashHasher<u32>>>;
 
 #[inline]
-fn morton3d(ix: u32, iy: u32, iz: u32) -> u64 {
-    fn part1by2(n: u32) -> u64 {
+fn morton3d(ix: u32, iy: u32, iz: u32) -> u32 {
+    fn part1by2(n: u32) -> u32 {
         // 21bit → 63bit へ 0bit 埋め込み（マジックビット法）
-        let mut x = n as u64 & 0x1fffff; // 21 bit
-        x = (x | x << 32) & 0x1f00000000ffff;
-        x = (x | x << 16) & 0x1f0000ff0000ff;
-        x = (x | x << 8) & 0x100f00f00f00f00f;
-        x = (x | x << 4) & 0x10c30c30c30c30c3;
-        x = (x | x << 2) & 0x1249249249249249;
+        // let mut x = n as u64 & 0x1fffff; // 21 bit
+        // x = (x | x << 32) & 0x1f00000000ffff;
+        // x = (x | x << 16) & 0x1f0000ff0000ff;
+        // x = (x | x << 8) & 0x100f00f00f00f00f;
+        // x = (x | x << 4) & 0x10c30c30c30c30c3;
+        // x = (x | x << 2) & 0x1249249249249249;
+        let mut x = n as u32 & 0x000003ff;
+        x = (x | (x << 16)) & 0xFF0000FF;
+        x = (x | (x << 8)) & 0x0300F00F;
+        x = (x | (x << 4)) & 0x030C30C3;
+        x = (x | (x << 2)) & 0x09249249;
         x
     }
     part1by2(ix) | (part1by2(iy) << 1) | (part1by2(iz) << 2)
@@ -31,8 +36,8 @@ fn voxel_downsample(points: &[Point], voxel_size: f32) -> Vec<Point> {
     let (mut min_x, mut min_y, mut min_z) = (f32::INFINITY, f32::INFINITY, f32::INFINITY);
     for p in points {
         min_x = min_x.min(p.x);
-        min_y = min_x.min(p.y);
-        min_z = min_x.min(p.z);
+        min_y = min_y.min(p.y);
+        min_z = min_z.min(p.z);
     }
 
     let inv = 1.0 / voxel_size;
@@ -124,7 +129,7 @@ fn main() {
 
     let start = Instant::now();
 
-    let voxel_size = 0.1;
+    let voxel_size = 0.05;
     let down = voxel_downsample(&pcd_points, voxel_size);
 
     let elpased = start.elapsed();
