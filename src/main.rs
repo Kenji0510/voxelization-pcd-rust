@@ -12,8 +12,8 @@ fn voxel_downsample(points: &[Point], voxel_size: f32) -> Vec<Point> {
     let (mut min_x, mut min_y, mut min_z) = (f32::INFINITY, f32::INFINITY, f32::INFINITY);
     for p in points {
         min_x = min_x.min(p.x);
-        min_y = min_x.min(p.y);
-        min_z = min_x.min(p.z);
+        min_y = min_y.min(p.y);
+        min_z = min_z.min(p.z);
     }
 
     let mut grid: HashMap<(i32, i32, i32), VoxelStat> = HashMap::with_capacity(points.len());
@@ -43,7 +43,7 @@ fn main() {
     println!("Hello, world!");
 
     let pcd_points = match load_pcd::load_pcd(
-        "/Users/kenji/workspace/Rust/rerun-sample/data/Laser_map/Laser_map_35.pcd",
+        "/Users/kenji/workspace/Rust/voxelization-myself/data/export-street-001.pcd",
     ) {
         Ok(points) => points,
         Err(e) => {
@@ -63,7 +63,7 @@ fn main() {
 
     let start = Instant::now();
 
-    let voxel_size = 0.1;
+    let voxel_size = 0.05;
     let down = voxel_downsample(&pcd_points, voxel_size);
 
     let elpased = start.elapsed();
